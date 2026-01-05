@@ -1,0 +1,87 @@
+{
+  "model": {
+    "type": "string",
+    "required": true,
+    "description": "模型 Endpoint ID，例如 ep-20251223200430-djx9q"
+  },
+  "content": {
+    "type": "array",
+    "required": true,
+    "description": "输入给模型的内容列表",
+    "items": [
+      {
+        "type": "object",
+        "description": "文本信息",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "text",
+            "required": true
+          },
+          "text": {
+            "type": "string",
+            "required": true,
+            "description": "视频生成提示词，建议不超过500字"
+          }
+        }
+      },
+      {
+        "type": "object",
+        "description": "图片信息 (参考图/首帧/尾帧)",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "image_url",
+            "required": true
+          },
+          "image_url": {
+            "type": "object",
+            "required": true,
+            "properties": {
+              "url": {
+                "type": "string",
+                "required": true,
+                "description": "图片链接或Base64编码 (data:image/...;base64,...)"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "generate_audio": {
+    "type": "boolean",
+    "required": false,
+    "description": "(Seedance 1.5 Pro) 是否生成音效。true: 生成, false: 不生成"
+  },
+  "resolution": {
+    "type": "string",
+    "required": false,
+    "description": "视频分辨率，格式为 宽*高，例如 1280*720"
+  },
+  "ratio": {
+    "type": "string",
+    "required": false,
+    "description": "视频宽高比，例如 16:9, 9:16"
+  },
+  "duration": {
+    "type": "integer",
+    "required": false,
+    "description": "视频时长(秒)，通常为 2 或 5"
+  },
+  "frames": {
+    "type": "integer",
+    "required": false,
+    "description": "视频帧数 (优先级高于 duration)"
+  },
+  "fps": {
+    "type": "integer",
+    "required": false,
+    "description": "视频帧率，默认 25"
+  },
+  "seed": {
+    "type": "integer",
+    "required": false,
+    "description": "随机种子，用于重现结果"
+  }
+}

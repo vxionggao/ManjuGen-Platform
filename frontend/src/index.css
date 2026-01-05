@@ -1,0 +1,28 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: #161618;
+  color-scheme: dark;
+}
+
+.full-height-tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.full-height-tabs .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.full-height-tabs .ant-tabs-content {
+  height: 100%;
+}
+
+.full-height-tabs .ant-tabs-tabpane {
+  height: 100%;
+}

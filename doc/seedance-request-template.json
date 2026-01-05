@@ -1,0 +1,22 @@
+{
+  "model": "ep-20251223200430-djx9q",
+  "content": [
+    {
+      "type": "text",
+      "text": "生成视频，男人双手合成法阵，向前扔出",
+      "role": "user"
+    },
+    {
+      "type": "image_url",
+      "image_url": {
+        "url": "https://example.com/input.jpg"
+      },
+      "role": "user"
+    }
+  ],
+  "generate_audio": true,
+  "resolution": "1280*720",
+  "ratio": "16:9",
+  "duration": 2,
+  "seed": 12345
+}

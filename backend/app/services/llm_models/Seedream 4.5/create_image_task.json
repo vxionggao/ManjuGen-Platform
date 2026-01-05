@@ -1,0 +1,33 @@
+{
+    "parameters": [
+        {
+            "name": "prompt",
+            "type": "string",
+            "required": true,
+            "description": "提示词，描述画面内容",
+            "constraints": {
+                "max_length": 1000
+            }
+        },
+        {
+            "name": "images",
+            "type": "list[base64]",
+            "required": false,
+            "description": "参考图列表，Base64编码。注意：单张图片大小不能超过10MB。",
+            "constraints": {
+                "max_size_mb": 10,
+                "max_count": 14
+            }
+        },
+        {
+            "name": "size",
+            "type": "string",
+            "required": false,
+            "default": "1024x1024",
+            "description": "生成图片尺寸",
+            "constraints": {
+                "enum": ["1024x1024", "2048x2048", "2560x1440"]
+            }
+        }
+    ]
+}

@@ -1,0 +1,30 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.coverage
+
+# Node/Frontend
+frontend/node_modules/
+frontend/.vite/
+frontend/.eslintcache
+
+# Build artifacts
+build/
+dist/FeiXingManJu/
+dist/*/
+.pyinstaller_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+logs/
+*.log

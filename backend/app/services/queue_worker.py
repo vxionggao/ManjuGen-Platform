@@ -76,6 +76,7 @@ class QueueWorker:
                 m = db.query(ModelConfig).filter_by(name=payload["model"]).first()
                 real_model = m.endpoint_id if m and m.endpoint_id else payload["model"]
                 urls = await self.image_client.create_image_task(real_model, payload.get("prompt", ""), payload.get("images"), payload.get("size"), api_key=api_key)
+                api_end = int(time.time())
                 print(f"Task {task_id} got urls: {urls}")
                 
                 # Download images
@@ -85,9 +86,8 @@ class QueueWorker:
                     local_urls.append(local)
                 
                 self.task_repo.set_result(db, task_id, local_urls)
-                now = int(time.time())
-                self.task_repo.update_status(db, task_id, "succeeded", now)
-                await manager.publish(1, {"type": "task_update", "id": str(task_id), "status": "succeeded", "result_urls": local_urls, "finished_at": now})
+                self.task_repo.update_status(db, task_id, "succeeded", api_end)
+                await manager.publish(1, {"type": "task_update", "id": str(task_id), "status": "succeeded", "result_urls": local_urls, "finished_at": api_end})
                 print(f"Task {task_id} finished")
             else:
                 m = db.query(ModelConfig).filter_by(name=payload["model"]).first()
@@ -137,13 +137,18 @@ class QueueWorker:
                 await self._poll_until_done(task_id, ext_id, api_key=api_key)
             db.close()
         except Exception as e:
-            print(f"QueueWorker Error: {e}")
+            import traceback
+            print("QueueWorker Error:")
+            print(traceback.format_exc())
             try:
                 self.task_repo.update_status(db, task_id, "failed")
                 await manager.publish(1, {"type": "task_update", "id": str(task_id), "status": "failed"})
-            except:
+            except Exception:
                 pass
-            db.close()
+            try:
+                db.close()
+            except Exception:
+                pass
         finally:
             bucket.release()
     async def _poll_until_done(self, task_id: int, ext_id: str, api_key: str = None):
@@ -165,7 +170,7 @@ class QueueWorker:
                      await manager.publish(1, {"type": "task_update", "id": str(task_id), "status": "running"})
 
                 if status in {"succeeded", "failed", "cancelled", "expired"}:
-                    now = int(time.time())
+                    api_end = int(time.time())
                     if status == "succeeded":
                         content = data.get("content") or {}
                         video_url = content.get("video_url")
@@ -176,19 +181,21 @@ class QueueWorker:
 
                         if video_url:
                             self.task_repo.set_video_result(db, task_id, local_video, local_cover)
-                            await manager.publish(1, {"type": "task_update", "id": str(task_id), "status": "succeeded", "video_url": local_video, "last_frame_url": local_cover, "finished_at": now})
+                            await manager.publish(1, {"type": "task_update", "id": str(task_id), "status": "succeeded", "video_url": local_video, "last_frame_url": local_cover, "finished_at": api_end})
                         else:
                             print(f"Task {task_id} succeeded but no video_url found")
                             status = "failed"
                     
                     final_status = status if status in ["succeeded", "failed"] else "failed"
-                    self.task_repo.update_status(db, task_id, final_status, now)
+                    self.task_repo.update_status(db, task_id, final_status, api_end)
                     if final_status == "failed":
                          await manager.publish(1, {"type": "task_update", "id": str(task_id), "status": "failed"})
                     break
                 await asyncio.sleep(2)
             except Exception as e:
-                print(f"Polling Error for task {task_id}: {e}")
+                import traceback
+                print(f"Polling Error for task {task_id}:")
+                print(traceback.format_exc())
                 # Don't break immediately, maybe network blip. 
                 # But if persistent, we should timeout. For now simple retry.
                 await asyncio.sleep(2)

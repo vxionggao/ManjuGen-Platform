@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { createTask, listTasks, listModels } from '../services/api'
+import { createTask, listTasks, listModels, deleteTask, resolvePrompt, listAssets, searchAssets, clearTasks } from '../services/api'
 import { connect } from '../services/ws'
-import { Layout, Select, Input, Button, Upload, Card, Tag, Typography, App as AntdApp, Row, Col, Empty, Spin, Space, Tooltip, Modal } from 'antd'
-import { InboxOutlined, PlayCircleOutlined, DownloadOutlined, CopyOutlined, ClockCircleOutlined, CheckCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { Layout, Select, Input, Button, Upload, Card, Tag, Typography, App as AntdApp, Row, Col, Empty, Spin, Space, Tooltip, Modal, Popconfirm, AutoComplete } from 'antd'
+import { InboxOutlined, PlayCircleOutlined, DownloadOutlined, CopyOutlined, ClockCircleOutlined, CheckCircleOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 
 const { Sider, Content } = Layout
 const { TextArea } = Input
@@ -11,12 +11,18 @@ const { Dragger } = Upload
 import { CachedImage } from '../components/CachedAsset'
 import { AssetCache } from '../services/cache'
 import { PreviewModal } from '../components/PreviewModal'
+import { MaterialLibrary } from '../components/MaterialLibrary'
+
+import { useLocation } from 'react-router-dom'
 
 export default function ArtStudio() {
+  const location = useLocation()
   const { message } = AntdApp.useApp()
   
   const isComposing = useRef(false)
   const [prompt, setPrompt] = useState(localStorage.getItem('art_prompt') || '')
+  const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
+  const [batchScenes, setBatchScenes] = useState<any[]>([])
   const [images, setImages] = useState<string[]>(() => {
     try { 
       const parsed = JSON.parse(localStorage.getItem('art_images') || '[]')
@@ -36,6 +42,11 @@ export default function ArtStudio() {
   const [models, setModels] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [preview, setPreview] = useState<{ visible: boolean, task?: any, url: string, type: 'image' | 'video', poster?: string, images?: string[], initialIndex?: number }>({ visible: false, url: '', type: 'image' })
+  const [materialLibraryVisible, setMaterialLibraryVisible] = useState(true)
+  const [assets, setAssets] = useState<any[]>([])
+  const [assetSuggestions, setAssetSuggestions] = useState<any[]>([])
+  const [showAssetSuggestions, setShowAssetSuggestions] = useState(false)
+  const [currentAssetType, setCurrentAssetType] = useState<string>('')
   
   useEffect(() => { localStorage.setItem('art_prompt', prompt) }, [prompt])
   useEffect(() => { localStorage.setItem('art_size', size) }, [size])
@@ -61,6 +72,61 @@ export default function ArtStudio() {
     }); 
     return ()=>ws.close() 
   }, [])
+
+  useEffect(() => {
+      if (location.state?.prompt) {
+          setPrompt(location.state.prompt)
+          if (location.state?.scenes && Array.isArray(location.state.scenes)) {
+              setBatchScenes(location.state.scenes)
+          }
+          if (location.state.autoGenerate) {
+              setShouldAutoSubmit(true)
+          }
+          window.history.replaceState({}, '')
+      }
+  }, [location])
+
+  useEffect(() => {
+      if (shouldAutoSubmit && modelId && models.length > 0 && !loading) {
+          // Delay slightly to ensure state is settled
+          setTimeout(() => {
+              if (batchScenes.length > 0) {
+                  handleBatchGenerate(batchScenes)
+                  setBatchScenes([])
+              } else {
+                  submit()
+              }
+              setShouldAutoSubmit(false)
+          }, 500)
+      }
+  }, [shouldAutoSubmit, modelId, models, loading, batchScenes])
+
+  const handleBatchGenerate = async (scenes: any[]) => {
+      if (!modelId) return message.error('请先配置生图模型')
+      setLoading(true)
+      try {
+          message.loading(`正在提交 ${scenes.length} 个分镜任务...`, 2)
+          const ps = scenes.map(scene => {
+              const payload: any = { 
+                  type: 'image', 
+                  model_id: modelId, 
+                  prompt: scene.prompt, 
+                  images: images 
+              }
+              if (size !== 'smart') payload.size = size
+              return createTask(payload)
+          })
+          
+          const newTasks = await Promise.all(ps)
+          message.success(`成功提交 ${newTasks.length} 个任务`)
+          setTasks(prev => [...newTasks, ...prev])
+      } catch (e) {
+          console.error(e)
+          message.error('批量提交失败')
+      } finally {
+          setLoading(false)
+      }
+  }
 
   const handleUpload = async (file: File) => {
     const b64 = await fToBase64(file)
@@ -192,6 +258,28 @@ export default function ArtStudio() {
     }
   }
 
+  const handleDelete = async (taskId: string) => {
+    try {
+        await deleteTask(taskId)
+        message.success('任务已删除')
+        setTasks(prev => prev.filter(t => t.id !== taskId))
+    } catch (e) {
+        console.error(e)
+        message.error('删除失败')
+    }
+  }
+
+  const handleClearHistory = async () => {
+    try {
+        await clearTasks('image')
+        message.success('历史记录已清空')
+        const res = await listTasks()
+        setTasks(res.filter((x:any) => x.type === 'image'))
+    } catch (e) {
+        message.error('清空失败')
+    }
+  }
+
   const formatTime = (ts: number) => new Date(ts * 1000).toLocaleString()
   const formatDuration = (start?: number, end?: number) => {
       if (!start || !end) return '-'
@@ -215,124 +303,263 @@ export default function ArtStudio() {
         e.preventDefault()
         submit()
     }
+    // Handle @ for asset suggestions
+    if (e.key === '@') {
+        setShowAssetSuggestions(true)
+    }
+  }
+
+  const handleAssetSelect = async (asset: any) => {
+    // Add asset reference to prompt
+    const assetReference = `@${asset.type}:{${asset.name}}`
+    setPrompt(prev => `${prev} ${assetReference}`.trim())
+    
+    // Add asset image to reference images
+    if (asset.cover_url || asset.url) {
+        const url = asset.cover_url || asset.url
+        try {
+            message.loading('正在加载素材参考图...', 1)
+            const blob = await AssetCache.getOrFetch(url, `asset_${asset.id}`)
+            const b64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader()
+                reader.onloadend = () => resolve(reader.result as string)
+                reader.readAsDataURL(blob)
+            })
+            setImages(prev => [...prev, b64])
+            message.success(`已添加素材: ${asset.name}`)
+        } catch (e) {
+            console.error('Failed to load asset image', e)
+            message.warning('素材已添加，但参考图加载失败')
+        }
+    } else {
+        message.success(`已添加素材: ${asset.name}`)
+    }
+  }
+
+  const handleSuggestionClick = async (asset: any) => {
+      const value = prompt
+      const lastAtIndex = value.lastIndexOf('@')
+      if (lastAtIndex !== -1) {
+          const newValue = value.substring(0, lastAtIndex) + `@${asset.type}:{${asset.name}} `
+          setPrompt(newValue)
+      } else {
+          setPrompt(prev => `${prev} @${asset.type}:{${asset.name}} `)
+      }
+      setShowAssetSuggestions(false)
+
+      // Add asset image
+      if (asset.cover_url || asset.url) {
+        const url = asset.cover_url || asset.url
+        try {
+            message.loading('正在加载素材参考图...', 1)
+            const blob = await AssetCache.getOrFetch(url, `asset_${asset.id}`)
+            const b64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader()
+                reader.onloadend = () => resolve(reader.result as string)
+                reader.readAsDataURL(blob)
+            })
+            setImages(prev => [...prev, b64])
+        } catch (e) {
+            console.error(e)
+        }
+    }
+  }
+
+  const handlePromptChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    setPrompt(value)
+    
+    // Check if user is typing @ for asset suggestions
+    const lastAtIndex = value.lastIndexOf('@')
+    if (lastAtIndex !== -1) {
+        const textAfterAt = value.substring(lastAtIndex + 1)
+        // If there is no space after @, we treat it as a search query
+        if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
+            setShowAssetSuggestions(true)
+            if (textAfterAt.length > 0) {
+                try {
+                    // Search with small topk
+                    const results = await searchAssets(textAfterAt, undefined, 5)
+                    setAssets(results)
+                } catch (e) {
+                    console.error(e)
+                }
+            } else {
+                // If just @, maybe show recent or random? Or clear?
+                // Let's show empty or keep previous if any
+            }
+        } else {
+            setShowAssetSuggestions(false)
+        }
+    } else {
+        setShowAssetSuggestions(false)
+    }
   }
 
   return (
     <Layout style={{ height: '100%', background: 'transparent' }}>
-      <Sider width={360} style={{ background: '#1f1f22', borderRight: '1px solid #333', padding: 24, overflowY: 'auto' }}>
-        {/* <Typography.Title level={4} style={{ color: '#fff', marginBottom: 24 }}>参考生图</Typography.Title> */}
-        
-        <Card style={{ background: '#2a2a2d', border: '1px solid #333', marginBottom: 24 }} styles={{ body: { padding: 16 } }}>
-          <div style={{ marginBottom: 12, color: '#ccc' }}>参考图 (可选)</div>
+      {/* Unified Left Sidebar: Material Library + Config */}
+      <Sider width={420} style={{ background: '#1f1f22', borderRight: '1px solid #333', overflowY: 'auto' }}>
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
           
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {images.map((img, i) => (
-                <div key={i} style={{ position: 'relative', width: 80, height: 80 }}>
-                    <img 
-                        src={img} 
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 4, border: '1px solid #444', cursor: 'pointer' }} 
-                        onClick={() => setPreview({ visible: true, url: img, type: 'image' })}
-                    />
-                    <div 
-                        style={{ position: 'absolute', top: -4, right: -4, background: '#333', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10, color: '#fff' }}
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            setImages(prev => prev.filter((_, idx) => idx !== i))
-                        }}
-                    >x</div>
-                </div>
-            ))}
-            <Dragger 
-                multiple 
-                beforeUpload={handleUpload as any} 
-                showUploadList={false}
-                style={{ width: 80, height: 80, background: '#1f1f22', border: '1px dashed #444', padding: 0, borderRadius: 4 }}
-            >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                    <PlusOutlined style={{ color: '#666', fontSize: 20 }} />
-                </div>
-            </Dragger>
+          {/* Material Library Section */}
+          <div style={{ height: 400, border: '1px solid #333', borderRadius: 8, overflow: 'hidden', background: '#161618' }}>
+             <MaterialLibrary onAssetSelect={handleAssetSelect} />
           </div>
-        </Card>
 
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ marginBottom: 8, color: '#ccc' }}>提示词</div>
-          <TextArea 
-            placeholder="描述想要生成的内容..." 
-            value={prompt} 
-            onChange={e => setPrompt(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={4} 
-            style={{ background: '#2a2a2d', border: '1px solid #333', color: '#fff' }} 
-          />
-        </div>
+          {/* Reference Image Section */}
+          <Card style={{ background: '#2a2a2d', border: '1px solid #333' }} styles={{ body: { padding: 16 } }}>
+            <div style={{ marginBottom: 12, color: '#ccc' }}>参考图 (可选)</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {images.map((img, i) => (
+                  <div key={i} style={{ position: 'relative', width: 80, height: 80 }}>
+                      <img 
+                          src={img} 
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 4, border: '1px solid #444', cursor: 'pointer' }} 
+                          onClick={() => setPreview({ visible: true, url: img, type: 'image' })}
+                      />
+                      <div 
+                          style={{ position: 'absolute', top: -4, right: -4, background: '#333', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10, color: '#fff' }}
+                          onClick={(e) => {
+                              e.stopPropagation()
+                              setImages(prev => prev.filter((_, idx) => idx !== i))
+                          }}
+                      >x</div>
+                  </div>
+              ))}
+              <Dragger 
+                  multiple 
+                  beforeUpload={handleUpload as any} 
+                  showUploadList={false}
+                  style={{ width: 80, height: 80, background: '#1f1f22', border: '1px dashed #444', padding: 0, borderRadius: 4 }}
+              >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                      <PlusOutlined style={{ color: '#666', fontSize: 20 }} />
+                  </div>
+              </Dragger>
+            </div>
+          </Card>
 
-        <Card style={{ background: '#2a2a2d', border: '1px solid #333', marginBottom: 24 }} styles={{ body: { padding: 16 } }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 8, color: '#ccc' }}>模型</div>
-            <Select 
-              value={modelId} 
-              onChange={setModelId} 
-              style={{ width: '100%' }}
-              options={models.map(m => ({ label: m.name, value: m.id }))}
-              popupMatchSelectWidth={false}
-            />
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 8, color: '#ccc' }}>宽高比</div>
-            <Select 
-              value={size} 
-              onChange={setSize} 
-              style={{ width: '100%' }}
-              options={[
-                { label: '智能适配 (Smart)', value: 'smart' },
-                { label: '1:1 (2048x2048)', value: '2048x2048' },
-                { label: '16:9 (2560x1440)', value: '2560x1440' },
-                { label: '9:16 (1440x2560)', value: '1440x2560' },
-                { label: '4:3 (2304x1728)', value: '2304x1728' },
-                { label: '3:4 (1728x2304)', value: '1728x2304' },
-              ]}
-            />
-          </div>
-          {/* 
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 8, color: '#ccc' }}>尺寸</div>
-            ... removed ...
-          </div> 
-          */}
+          {/* Prompt Section */}
           <div>
-            <div style={{ marginBottom: 8, color: '#ccc' }}>数量</div>
-            <div style={{ display: 'flex', background: '#1f1f22', borderRadius: 6, padding: 4, border: '1px solid #444' }}>
-                {[1, 2, 3, 4].map(n => (
+            <div style={{ marginBottom: 8, color: '#ccc' }}>提示词</div>
+            <div style={{ position: 'relative' }}>
+              <TextArea 
+                placeholder="描述想要生成的内容..." 
+                value={prompt} 
+                onChange={handlePromptChange}
+                onKeyDown={handleKeyDown}
+                rows={4} 
+                style={{ background: '#2a2a2d', border: '1px solid #333', color: '#fff' }} 
+              />
+              {showAssetSuggestions && (
+                <div style={{ 
+                  position: 'absolute', 
+                  top: '100%', 
+                  left: 0, 
+                  right: 0, 
+                  background: '#2a2a2d', 
+                  border: '1px solid #333', 
+                  borderRadius: 4, 
+                  marginTop: 4, 
+                  zIndex: 1000, 
+                  maxHeight: 200, 
+                  overflowY: 'auto'
+                }}>
+                  <div style={{ padding: 8, color: '#ccc', fontSize: 12, borderBottom: '1px solid #333' }}>
+                    选择素材...
+                  </div>
+                  {assets.slice(0, 5).map((asset) => (
                     <div 
-                        key={n}
-                        onClick={() => setCount(n)}
-                        style={{ 
-                            flex: 1, 
-                            textAlign: 'center', 
-                            padding: '4px 0', 
-                            cursor: 'pointer', 
-                            borderRadius: 4,
-                            background: count === n ? '#333' : 'transparent',
-                            color: count === n ? '#fff' : '#888',
-                            fontSize: 14,
-                            fontWeight: count === n ? 600 : 400
-                        }}
+                      key={asset.asset_id} 
+                      onClick={() => handleSuggestionClick(asset)}
+                      style={{ 
+                        padding: 12, 
+                        cursor: 'pointer', 
+                        borderBottom: '1px solid #333'
+                      }}
                     >
-                        {n}
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 2 }}>
+                        {asset.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#888' }}>
+                        {asset.description.substring(0, 30)}
+                        {asset.description.length > 30 && '...'}
+                      </div>
                     </div>
-                ))}
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-        </Card>
 
-        <Button type="primary" block size="large" onClick={submit} loading={loading} style={{ height: 48, fontSize: 16, fontWeight: 600 }}>
-          生成
-        </Button>
+          {/* Settings Section */}
+          <Card style={{ background: '#2a2a2d', border: '1px solid #333' }} styles={{ body: { padding: 16 } }}>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ marginBottom: 8, color: '#ccc' }}>模型</div>
+              <Select 
+                value={modelId} 
+                onChange={setModelId} 
+                style={{ width: '100%' }}
+                options={models.map(m => ({ label: m.name, value: m.id }))}
+                popupMatchSelectWidth={false}
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ marginBottom: 8, color: '#ccc' }}>宽高比</div>
+              <Select 
+                value={size} 
+                onChange={setSize} 
+                style={{ width: '100%' }}
+                options={[
+                  { label: '智能适配 (Smart)', value: 'smart' },
+                  { label: '1:1 (2048x2048)', value: '2048x2048' },
+                  { label: '16:9 (2560x1440)', value: '2560x1440' },
+                  { label: '9:16 (1440x2560)', value: '1440x2560' },
+                  { label: '4:3 (2304x1728)', value: '2304x1728' },
+                  { label: '3:4 (1728x2304)', value: '1728x2304' },
+                ]}
+              />
+            </div>
+            <div>
+              <div style={{ marginBottom: 8, color: '#ccc' }}>数量</div>
+              <div style={{ display: 'flex', background: '#1f1f22', borderRadius: 6, padding: 4, border: '1px solid #444' }}>
+                  {[1, 2, 3, 4].map(n => (
+                      <div 
+                          key={n}
+                          onClick={() => setCount(n)}
+                          style={{ 
+                              flex: 1, 
+                              textAlign: 'center', 
+                              padding: '4px 0', 
+                              cursor: 'pointer', 
+                              borderRadius: 4,
+                              background: count === n ? '#333' : 'transparent',
+                              color: count === n ? '#fff' : '#888',
+                              fontSize: 14,
+                              fontWeight: count === n ? 600 : 400
+                          }}
+                      >
+                          {n}
+                      </div>
+                  ))}
+              </div>
+            </div>
+          </Card>
+
+          <Button type="primary" block size="large" onClick={submit} loading={loading} style={{ height: 48, fontSize: 16, fontWeight: 600 }}>
+            生成
+          </Button>
+        </div>
       </Sider>
 
       <Content style={{ padding: 24, overflowY: 'auto' }}>
-        <Typography.Title level={5} style={{ color: '#888', marginBottom: 16 }}>进行中 / 历史记录</Typography.Title>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+             <Typography.Title level={5} style={{ color: '#888', margin: 0 }}>进行中 / 历史记录</Typography.Title>
+             <Popconfirm title="确认清空所有已完成任务？" onConfirm={handleClearHistory} okText="清空" cancelText="取消">
+                 <Button type="text" icon={<DeleteOutlined />} style={{ color: '#888' }}>一键清空历史</Button>
+             </Popconfirm>
+        </div>
         {tasks.length === 0 ? (
           <Empty description={<span style={{ color: '#666' }}>暂无任务</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
@@ -371,6 +598,9 @@ export default function ArtStudio() {
                                 document.body.removeChild(a)
                             }} title="下载" />
                         )}
+                        <Popconfirm title="确认删除任务？" onConfirm={() => handleDelete(t.id)} okText="删除" cancelText="取消">
+                            <Button size="small" type="text" icon={<DeleteOutlined style={{ color: '#888' }} />} title="删除" />
+                        </Popconfirm>
                     </Space>
                 </div>
 

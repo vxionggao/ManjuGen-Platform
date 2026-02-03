@@ -1,6 +1,6 @@
 import { Layout, Menu, Avatar, Dropdown } from 'antd'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { UserOutlined, PictureOutlined, VideoCameraOutlined, SettingOutlined, LogoutOutlined } from '@ant-design/icons'
+import { UserOutlined, PictureOutlined, VideoCameraOutlined, SettingOutlined, LogoutOutlined, FolderOutlined, HomeOutlined } from '@ant-design/icons'
 import { useUser } from '../stores/user'
 
 const { Header, Content } = Layout
@@ -35,8 +35,10 @@ export default function AppLayout() {
           selectedKeys={[loc.pathname]}
           style={{ flex: 1, borderBottom: 0, background: 'transparent', lineHeight: '48px' }}
           items={[
-            { key: '/art', icon: <PictureOutlined />, label: <Link to="/art">图片生成</Link> },
-            { key: '/motion', icon: <VideoCameraOutlined />, label: <Link to="/motion">视频生成</Link> },
+            { key: '/', icon: <HomeOutlined />, label: <Link to="/">首页</Link> },
+            { key: '/assets', icon: <FolderOutlined />, label: <Link to="/assets">导演</Link> },
+            { key: '/art', icon: <PictureOutlined />, label: <Link to="/art">美术师</Link> },
+            { key: '/motion', icon: <VideoCameraOutlined />, label: <Link to="/motion">动效师</Link> },
             { key: '/admin', icon: <SettingOutlined />, label: <Link to="/admin">管理配置</Link> },
           ]}
         />

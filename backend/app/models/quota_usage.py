@@ -5,5 +5,5 @@ class QuotaUsage(Base):
     __tablename__ = "quota_usage"
     id = Column(Integer, primary_key=True, index=True)
     model_id = Column(Integer)
-    date = Column(String)
+    date = Column(String(50))
     count = Column(Integer)

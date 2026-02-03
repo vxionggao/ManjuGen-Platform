@@ -1,13 +1,45 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+import os
+
+# DB Imports for Early Config Loading
+from .db import Base, engine, SessionLocal
+from .repositories.system_config_repo import SystemConfigRepo
+
+# Load Env Vars EARLY (Before other imports might init veadk)
+try:
+    db = SessionLocal()
+    sys_repo = SystemConfigRepo()
+    ak = sys_repo.get(db, "volc_access_key")
+    if ak and ak.value:
+        os.environ["VOLC_ACCESSKEY"] = ak.value
+        os.environ["VOLC_ACCESS_KEY"] = ak.value
+        print(f"EARLY LOAD: VOLC_ACCESSKEY loaded")
+    sk = sys_repo.get(db, "volc_secret_key")
+    if sk and sk.value:
+        os.environ["VOLC_SECRETKEY"] = sk.value
+        os.environ["VOLC_SECRET_KEY"] = sk.value
+    ark = sys_repo.get(db, "volc_api_key")
+    if ark and ark.value:
+         os.environ["ARK_API_KEY"] = ark.value
+    db.close()
+except Exception as e:
+    print(f"EARLY LOAD FAILED: {e}")
+
 from .api.users import router as users_router
 from .api.tasks import router as tasks_router
 from .api.config import router as config_router
 from .api.queue import router as queue_router
 from .api.storage import router as storage_router
+from .api.assets import router as assets_router, prompt_router as prompt_router
+from .api.materials import router as materials_router
+from .api.badcase import router as badcase_router
+from .api.best_practices import router as best_practices_router
+from .api.story import router as story_router
+from .api.video import router as video_router
+from .api.projects import router as projects_router
 from .services.manager_singleton import manager
-from .db import Base, engine, SessionLocal
 from .services.worker_singleton import worker
 
 app = FastAPI(redirect_slashes=False)
@@ -22,7 +54,8 @@ def get_static_dir():
         base_path = sys._MEIPASS
     else:
         # Running in dev mode
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Use backend/app/static
+        base_path = os.path.dirname(os.path.abspath(__file__))
     
     static_path = os.path.join(base_path, "static")
     if not os.path.exists(static_path):
@@ -49,6 +82,14 @@ app.include_router(tasks_router)
 app.include_router(config_router)
 app.include_router(queue_router)
 app.include_router(storage_router)
+app.include_router(assets_router)
+app.include_router(prompt_router)
+app.include_router(materials_router)
+app.include_router(badcase_router)
+app.include_router(best_practices_router)
+app.include_router(story_router, prefix="/api/story", tags=["story"])
+app.include_router(video_router)
+app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
 
 @app.websocket("/ws/tasks")
 async def ws_tasks(ws: WebSocket):
@@ -61,6 +102,23 @@ async def ws_tasks(ws: WebSocket):
 
 @app.on_event("startup")
 def startup():
+    # 先删除Asset表，然后重新创建，确保表结构是最新的
+    from sqlalchemy import text
+    from .models.asset import Asset
+    from .models.project import Project
+    
+    # 检查Asset表是否存在
+    # try:
+    #     with engine.connect() as conn:
+    #         result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='assets';"))
+    #         if result.fetchone():
+    #             print("Dropping existing assets table...")
+    #             conn.execute(text("DROP TABLE assets;"))
+    #             conn.commit()
+    # except Exception as e:
+    #     print(f"Error dropping assets table: {e}")
+    
+    # 创建所有表
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     from .services.user_service import UserService
@@ -104,6 +162,11 @@ def startup():
     
     if not sys_repo.get(db, "storage_type"):
         sys_repo.set(db, "storage_type", "local", "Storage Type (local/s3/oss)")
+
+    # Initialize built-in assets
+    # from .services.asset_initializer import AssetInitializer
+    # asset_initializer = AssetInitializer(db)
+    # asset_initializer.initialize_built_in_assets()
 
     # Resume running tasks
     from .models.task import Task

@@ -18,9 +18,23 @@ class VolcVideoClient:
         # 复制一份 payload 以免修改原字典
         req_payload = payload.copy()
 
-        # 处理resolution格式（确保使用*分隔）
+        # 处理分辨率: 将诸如 1280x720/720x1280 等规范化为 API 接受的枚举值（720p/1080p）
         if "resolution" in req_payload:
-            req_payload["resolution"] = req_payload["resolution"].replace("x", "*")
+            val = str(req_payload["resolution"])
+            try:
+                if "x" in val:
+                    w, h = val.split("x")
+                elif "*" in val:
+                    w, h = val.split("*")
+                else:
+                    w, h = val, val
+                w_i = int(float(w))
+                h_i = int(float(h))
+                max_side = max(w_i, h_i)
+                req_payload["resolution"] = "1080p" if max_side >= 1080 else "720p"
+            except:
+                # 若解析失败，回退到 720p
+                req_payload["resolution"] = "720p"
         
         key = api_key or ARK_API_KEY
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}

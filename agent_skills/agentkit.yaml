@@ -1,0 +1,34 @@
+common:
+  agent_name: agent_skills
+  entry_point: agent.py
+  description: ''
+  language: Python
+  language_version: '3.12'
+  agent_type: Basic App
+  dependencies_file: requirements.txt
+  runtime_envs:
+    AGENTKIT_TOOL_ID: '{{tyee5jucum8oz2eqbtjlg}}'
+  launch_type: cloud
+launch_types:
+  cloud:
+    region: cn-beijing
+    tos_bucket: agentkit-platform-{{account_id}}
+    tos_prefix: agentkit-builds
+    image_tag: '{{timestamp}}'
+    cr_instance_name: agentkit-platform-{{account_id}}
+    cr_namespace_name: agentkit
+    cr_image_full_url: agentkit-platform-2108338699-cn-beijing.cr.volces.com/agentkit/agent_skills-sca4:20260123180925
+    build_timeout: 3600
+    cp_workspace_name: agentkit-cli-workspace
+    cp_pipeline_name: agent_skills-g4nafotf
+    cp_pipeline_id: 120de18d4e3140aaba33a67b8903937d
+    runtime_id: r-yee5phn5ds54ppxtyqeo
+    runtime_name: agent_skills-g4nafotf
+    runtime_role_name: AgentKit-Runtime-Default-ServiceRole-tnz8y97
+    runtime_auth_type: key_auth
+    runtime_apikey_name: API-KEY-jzuehl1g
+    runtime_apikey: iXKh5kMM5teaPJPoN6SuPDD1LO-eoVmydR07
+    runtime_jwt_allowed_clients: []
+    runtime_endpoint: https://sd5pkip3al76cj6rd7vag.apigateway-cn-beijing.volceapi.com
+docker_build:
+  platform: auto

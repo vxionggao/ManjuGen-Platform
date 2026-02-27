@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import aiofiles
+from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..schemas.task import CreateTaskRequest, TaskOut
@@ -177,9 +178,57 @@ def list_tasks(user=Depends(get_current_user)):
     return out
 
 @router.delete("")
-def clear_tasks(user=Depends(get_current_user)):
+def clear_tasks(type: Optional[str] = None, user=Depends(get_current_user)):
     db: Session = SessionLocal()
     repo = TaskRepo()
-    repo.clear_all(db, 1)
+    # TODO: Also delete files from storage for all tasks?
+    # Current implementation only clears DB records.
+    repo.clear_all(db, 1, type)
     db.close()
     return {"message": "All tasks cleared"}
+
+@router.delete("/{task_id}")
+async def delete_task(task_id: int, user=Depends(get_current_user)):
+    db: Session = SessionLocal()
+    repo = TaskRepo()
+    storage = StorageService(db)
+    
+    # 1. Get task info to find associated files
+    task = repo.get(db, task_id)
+    if not task:
+        db.close()
+        return {"message": "Task not found"}
+        
+    # 2. Delete files from storage
+    try:
+        # Handle result_urls
+        if task.result_urls:
+            try:
+                urls = json.loads(task.result_urls)
+            except:
+                urls = task.result_urls.split(",")
+            for url in urls:
+                await storage.delete_file(url)
+                
+        # Handle input_images
+        if task.input_images:
+            try:
+                inputs = json.loads(task.input_images)
+            except:
+                inputs = task.input_images.split(",")
+            for url in inputs:
+                await storage.delete_file(url)
+                
+        # Handle video files
+        if task.video_url:
+            await storage.delete_file(task.video_url)
+        if task.last_frame_url:
+            await storage.delete_file(task.last_frame_url)
+    except Exception as e:
+        print(f"Warning: Failed to delete some files for task {task_id}: {e}")
+        # Proceed to delete DB record anyway
+
+    # 3. Delete from DB
+    repo.delete(db, task_id)
+    db.close()
+    return {"message": f"Task {task_id} deleted"}

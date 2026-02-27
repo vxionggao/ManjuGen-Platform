@@ -1,0 +1,12 @@
+agent_name: et-app
+app_name: et-app
+entry_file: run.py
+python_version: "3.10"
+dependencies_file: backend/requirements.txt
+deploy_mode: cloud
+region: cn-beijing
+env:
+  MODEL_AGENT_NAME: ""
+  MODEL_AGENT_API_KEY: ""
+  VOLCENGINE_ACCESS_KEY: ""
+  VOLCENGINE_SECRET_KEY: ""

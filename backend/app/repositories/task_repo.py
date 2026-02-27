@@ -30,6 +30,19 @@ class TaskRepo:
         db.commit()
     def list_by_user(self, db: Session, user_id: int) -> List[Task]:
         return db.query(Task).filter(Task.user_id == user_id).all()
-    def clear_all(self, db: Session, user_id: int) -> None:
-        db.query(Task).filter(Task.user_id == user_id).delete()
+    def clear_all(self, db: Session, user_id: int, task_type: Optional[str] = None) -> None:
+        query = db.query(Task).filter(
+            Task.user_id == user_id,
+            Task.status.in_(['succeeded', 'failed'])
+        )
+        if task_type:
+            query = query.filter(Task.type == task_type)
+        query.delete(synchronize_session=False)
+        db.commit()
+
+    def get(self, db: Session, task_id: int) -> Optional[Task]:
+        return db.query(Task).filter(Task.id == task_id).first()
+    
+    def delete(self, db: Session, task_id: int) -> None:
+        db.query(Task).filter(Task.id == task_id).delete()
         db.commit()

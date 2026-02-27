@@ -1,0 +1,37 @@
+common:
+  agent_name: simple_agent
+  entry_point: simple_agent.py
+  description: AgentKit project simple_agent - Basic Agent App
+  language: Python
+  language_version: '3.12'
+  agent_type: Basic App
+  dependencies_file: requirements.txt
+  runtime_envs:
+    DATABASE_URL: mysql+pymysql://hm-admin:VOL-rds-hm@mysqld370cee079d5.rds.ivolces.com:3306/anime
+  launch_type: cloud
+launch_types:
+  cloud:
+    region: cn-beijing
+    tos_bucket: agentkit-platform-{{account_id}}
+    tos_prefix: agentkit-builds
+    image_tag: '{{timestamp}}'
+    cr_instance_name: agentkit-platform-{{account_id}}
+    cr_namespace_name: agentkit
+    cr_repo_name: hm_agent_g0ihm1h
+    cr_auto_create_instance_type: Micro
+    cr_image_full_url: agentkit-platform-2108338699-cn-beijing.cr.volces.com/agentkit/hm_agent_g0ihm1h:20260123171223
+    build_timeout: 3600
+    cp_workspace_name: agentkit-cli-workspace
+    cp_pipeline_name: hm_Agent_g0ihm1h
+    cp_pipeline_id: 9d5345a5b2ca4a0aaba8f7c3c2aefe89
+    runtime_id: r-yedsgg7zlsntl8dnjiwe
+    runtime_name: hm_Agent_g0ihm1h
+    runtime_role_name: AgentKit-Runtime-Default-ServiceRole-nynx5i6
+    runtime_auth_type: key_auth
+    runtime_apikey_name: API-KEY-n6g7tft5
+    runtime_apikey: 8q28-oQ2wDTrSqQTTHHH1gAxBhEi3YxMJab7
+    runtime_jwt_allowed_clients: []
+    runtime_endpoint: https://sd5m953pitm8rf8oceq9g.apigateway-cn-beijing.volceapi.com
+    deploy_timestamp: ''
+docker_build:
+  platform: auto

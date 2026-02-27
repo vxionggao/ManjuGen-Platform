@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+httpx
+pytest
+agentkit-sdk-python
+veadk-python
+aiofiles
+pymysql

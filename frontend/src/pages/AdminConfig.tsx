@@ -243,7 +243,7 @@ function SystemConfig() {
     const save = async (values: any) => {
       setLoading(true)
       try {
-          const ps = Object.keys(values).map(key => updateSystemConfig({ key, value: values[key] }))
+          const ps = Object.keys(values).map(key => updateSystemConfig({ key, value: values[key] || "" }))
           await Promise.all(ps)
           message.success('配置已保存并应用')
       } catch {
@@ -260,6 +260,17 @@ function SystemConfig() {
               <Card style={{ background: '#2a2a2d', border: '1px solid #333', marginBottom: 32 }}>
                 <Form.Item name="volc_api_key" label={<span style={{ color: '#ccc' }}>API Key</span>} tooltip="Volcengine Ark API Key">
                     <Input.Password style={{ background: '#1f1f22', border: '1px solid #333', color: '#fff' }} placeholder="从火山引擎控制台获取" />
+                </Form.Item>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Form.Item name="volc_access_key" label={<span style={{ color: '#ccc' }}>Access Key (AK)</span>} tooltip="Volcengine IAM Access Key">
+                        <Input style={{ background: '#1f1f22', border: '1px solid #333', color: '#fff' }} />
+                    </Form.Item>
+                    <Form.Item name="volc_secret_key" label={<span style={{ color: '#ccc' }}>Secret Key (SK)</span>} tooltip="Volcengine IAM Secret Key">
+                        <Input.Password style={{ background: '#1f1f22', border: '1px solid #333', color: '#fff' }} />
+                    </Form.Item>
+                </div>
+                <Form.Item name="badcase_llm_endpoint" label={<span style={{ color: '#ccc' }}>Badcase LLM Endpoint</span>} tooltip="Endpoint ID for Badcase Analysis (e.g. ep-2025...)">
+                    <Input style={{ background: '#1f1f22', border: '1px solid #333', color: '#fff' }} placeholder="ep-20250205183353-v7b9x" />
                 </Form.Item>
               </Card>
               

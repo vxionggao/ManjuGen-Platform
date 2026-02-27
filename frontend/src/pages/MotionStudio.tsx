@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { createTask, listTasks, listModels } from '../services/api'
+import { createTask, listTasks, listModels, deleteTask, clearTasks } from '../services/api'
 import { connect } from '../services/ws'
-import { Layout, Select, Input, Button, Upload, Card, Tag, Typography, App as AntdApp, Row, Col, Empty, Spin, Space, Switch, Checkbox, Tooltip, Modal } from 'antd'
-import { InboxOutlined, PlayCircleOutlined, DownloadOutlined, CopyOutlined, ClockCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { Layout, Select, Input, Button, Upload, Card, Tag, Typography, App as AntdApp, Row, Col, Empty, Spin, Space, Switch, Checkbox, Tooltip, Modal, Popconfirm } from 'antd'
+import { InboxOutlined, PlayCircleOutlined, DownloadOutlined, CopyOutlined, ClockCircleOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 
 const { Sider, Content } = Layout
 const { TextArea } = Input
@@ -11,6 +11,7 @@ const { Dragger } = Upload
 import { CachedImage, CachedVideo } from '../components/CachedAsset'
 import { AssetCache } from '../services/cache'
 import { PreviewModal } from '../components/PreviewModal'
+import { MaterialLibrary } from '../components/MaterialLibrary'
 
 export default function MotionStudio() {
   const { message } = AntdApp.useApp()
@@ -247,6 +248,28 @@ export default function MotionStudio() {
     }
   }
 
+  const handleClearHistory = async () => {
+    try {
+        await clearTasks('video')
+        message.success('历史记录已清空')
+        const res = await listTasks()
+        setTasks(res.filter((x:any) => x.type === 'video'))
+    } catch (e) {
+        message.error('清空失败')
+    }
+  }
+
+  const handleDelete = async (taskId: string) => {
+    try {
+        await deleteTask(taskId)
+        message.success('任务已删除')
+        setTasks(prev => prev.filter(t => t.id !== taskId))
+    } catch (e) {
+        console.error(e)
+        message.error('删除失败')
+    }
+  }
+
   const formatTime = (ts: number) => new Date(ts * 1000).toLocaleString()
   const formatDuration = (start?: number, end?: number) => {
       if (!start || !end) return '-'
@@ -272,10 +295,53 @@ export default function MotionStudio() {
     }
   }
 
+  const handleAssetSelect = async (asset: any) => {
+    // Add asset reference to prompt
+    const assetReference = `@${asset.type}:{${asset.name}}`
+    setPrompt(prev => `${prev} ${assetReference}`.trim())
+    
+    // Add asset image to First/Last Frame
+    if (asset.cover_url || asset.url) {
+        const url = asset.cover_url || asset.url
+        try {
+            message.loading('正在加载素材参考图...', 1)
+            const blob = await AssetCache.getOrFetch(url, `asset_${asset.id}`)
+            const b64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader()
+                reader.onloadend = () => resolve(reader.result as string)
+                reader.readAsDataURL(blob)
+            })
+            
+            if (!firstFrame) {
+                setFirstFrame(b64)
+                message.success(`已添加素材: ${asset.name} (首帧)`)
+            } else if (!lastFrame) {
+                setLastFrame(b64)
+                message.success(`已添加素材: ${asset.name} (尾帧)`)
+            } else {
+                setFirstFrame(b64)
+                message.success(`已添加素材: ${asset.name} (已替换首帧)`)
+            }
+        } catch (e) {
+            console.error('Failed to load asset image', e)
+            message.warning('素材已添加，但参考图加载失败')
+        }
+    } else {
+        message.success(`已添加素材: ${asset.name}`)
+    }
+  }
+
   return (
     <Layout style={{ height: '100%', background: 'transparent' }}>
-      <Sider width={360} style={{ background: '#1f1f22', borderRight: '1px solid #333', padding: 24, overflowY: 'auto' }}>
-        <Card style={{ background: '#2a2a2d', border: '1px solid #333', marginBottom: 24 }} styles={{ body: { padding: 16 } }}>
+      <Sider width={420} style={{ background: '#1f1f22', borderRight: '1px solid #333', overflowY: 'auto' }}>
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
+          
+          {/* Material Library Section */}
+          <div style={{ height: 400, border: '1px solid #333', borderRadius: 8, overflow: 'hidden', background: '#161618' }}>
+             <MaterialLibrary onAssetSelect={handleAssetSelect} />
+          </div>
+
+          <Card style={{ background: '#2a2a2d', border: '1px solid #333' }} styles={{ body: { padding: 16 } }}>
           <div style={{ marginBottom: 12, color: '#ccc' }}>参考图 (首尾帧控制)</div>
           
           <div style={{ display: 'flex', gap: 12 }}>
@@ -426,10 +492,16 @@ export default function MotionStudio() {
         <Button type="primary" block size="large" onClick={submit} loading={loading} style={{ height: 48, fontSize: 16, fontWeight: 600 }}>
           生成
         </Button>
+      </div>
       </Sider>
 
       <Content style={{ padding: 24, overflowY: 'auto' }}>
-        <Typography.Title level={5} style={{ color: '#888', marginBottom: 16 }}>进行中 / 历史记录</Typography.Title>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+             <Typography.Title level={5} style={{ color: '#888', margin: 0 }}>进行中 / 历史记录</Typography.Title>
+             <Popconfirm title="确认清空所有已完成任务？" onConfirm={handleClearHistory} okText="清空" cancelText="取消">
+                 <Button type="text" icon={<DeleteOutlined />} style={{ color: '#888' }}>一键清空历史</Button>
+             </Popconfirm>
+        </div>
         {tasks.length === 0 ? (
           <Empty description={<span style={{ color: '#666' }}>暂无任务</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
@@ -468,6 +540,9 @@ export default function MotionStudio() {
                                 document.body.removeChild(a)
                             }} title="下载" />
                         )}
+                        <Popconfirm title="确认删除任务？" onConfirm={() => handleDelete(t.id)} okText="删除" cancelText="取消">
+                            <Button size="small" type="text" icon={<DeleteOutlined style={{ color: '#888' }} />} title="删除" />
+                        </Popconfirm>
                     </Space>
                 </div>
 

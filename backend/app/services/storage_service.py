@@ -1,4 +1,5 @@
 import os
+import asyncio
 import aiohttp
 import aiofiles
 import time
@@ -81,57 +82,58 @@ class StorageService:
     async def upload_content(self, content: Union[bytes, str], task_id: int, file_type: str, filename: str) -> str:
         """
         Upload content (bytes or string) to storage.
-        path structure: anime_platform/project/default/<type>/<task_id>/<filename>
+        If TOS is configured, upload to TOS.
+        Otherwise, fallback to LOCAL storage (to prevent 500 errors if TOS is missing).
         """
-        storage_type = self._get_config("storage_type") or "local"
+        # 1. Local Cache (Always keep for internal use)
+        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
-        # Path logic
-        # anime_platform/project/default/<type>/<taskid>/<filename>
-        # type is usually 'image' or 'video'. We can infer from file_type or pass it.
-        # file_type: 'image' or 'video' or 'text'
-        remote_key = f"anime_platform/project/default/{file_type}/{task_id}/{filename}"
-        
-        if storage_type == "tos":
-            try:
-                client = self._get_tos_client()
-                if client:
-                    bucket = self._get_config("storage_bucket")
-                    client.put_object(bucket, remote_key, content=content)
-                    
-                    # Generate Pre-signed URL (valid for 1 hour)
-                    # This is safer than public access and works for private buckets too.
-                    try:
-                        # 3600 seconds = 1 hour
-                        out = client.pre_signed_url(tos.HttpMethodType.Http_Method_Get, bucket, remote_key, expires=3600)
-                        # Check if out is string or object
-                        if hasattr(out, 'signed_url'):
-                             return out.signed_url
-                        return out # Older SDK might return string? Or new SDK returns object. 
-                        # Based on docs: returns PreSignedUrlOutput object which has signed_url
-                    except Exception as e:
-                        print(f"Pre-sign failed: {e}")
-                        # Fallback to constructing public URL if signing fails
-                        endpoint = self._get_config("storage_endpoint")
-                        return f"https://{bucket}.{endpoint}/{remote_key}"
-            except Exception as e:
-                print(f"TOS Upload failed: {e}")
-                # Fallback to local if upload fails? Or raise?
-                # User wants to reduce DB size, so failing here is critical.
-                # But for now, let's fallback to local if TOS fails to avoid breaking flow completely, 
-                # OR we can return empty string to indicate failure.
-                pass
-        
-        # Local fallback
-        # Save to static/anime_platform/...
-        local_dir = f"static/anime_platform/project/default/{file_type}/{task_id}"
-        os.makedirs(local_dir, exist_ok=True)
-        local_path = os.path.join(local_dir, filename)
-        
-        mode = 'w' if isinstance(content, str) else 'wb'
-        async with aiofiles.open(local_path, mode=mode) as f:
-            await f.write(content)
+        # Determine local path
+        if file_type == "video":
+            local_rel_path = f"static/cache/{task_id}_{filename}"
+        else:
+            # Default structure for images/others
+            local_rel_path = f"static/uploads/{task_id}_{filename}"
             
-        return f"/static/anime_platform/project/default/{file_type}/{task_id}/{filename}"
+        local_abs_path = os.path.join(app_dir, local_rel_path)
+        os.makedirs(os.path.dirname(local_abs_path), exist_ok=True)
+        
+        # Write to local disk
+        try:
+            mode = 'wb' if isinstance(content, bytes) else 'w'
+            async with aiofiles.open(local_abs_path, mode) as f:
+                await f.write(content)
+            print(f"Saved local file to {local_abs_path}")
+        except Exception as e:
+            print(f"Failed to save local file: {e}")
+            
+        # 2. Try TOS Upload
+        try:
+            client = self._get_tos_client()
+            bucket = self._get_config("storage_bucket")
+            
+            if client and bucket:
+                remote_key = f"anime_platform/project/default/{file_type}/{task_id}/{filename}"
+                client.put_object(bucket, remote_key, content=content)
+                
+                # Generate Pre-signed URL
+                out = client.pre_signed_url(
+                    tos.HttpMethodType.Http_Method_Get, 
+                    bucket, 
+                    remote_key, 
+                    expires=3600,
+                    response_content_disposition='inline'
+                )
+                if hasattr(out, 'signed_url'):
+                     return out.signed_url
+                return out
+        except Exception as e:
+            print(f"TOS Upload skipped/failed: {e}")
+            # Do NOT raise exception here, fallback to local URL
+            
+        # 3. Fallback to Local URL
+        # URL should be relative to backend root, e.g. /static/cache/...
+        return f"/{local_rel_path}"
 
     async def save_file(self, url: str, task_id: int, file_type: str, filename: str = None) -> str:
         """
@@ -139,12 +141,19 @@ class StorageService:
         """
         if not url: return ""
         
-        # Download content
+        # Download content with simple retry
         content = None
+        attempts = 3
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    content = await resp.read()
+            for _ in range(attempts):
+                try:
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            content = await resp.read()
+                            break
+                except Exception as e:
+                    pass
+                await asyncio.sleep(0.5)
         
         if not content:
             return url # Failed to download
@@ -158,3 +167,52 @@ class StorageService:
         
         return await self.upload_content(content, task_id, file_type, filename)
 
+    async def delete_file(self, url: str) -> bool:
+        """
+        Delete file from storage (TOS or local).
+        Smartly detects storage type based on URL format.
+        Suppresses all exceptions to prevent blocking deletion flows.
+        """
+        if not url: return True
+        
+        try:
+            # Case 1: Local File (/static/...)
+            if url.startswith("/static/"):
+                try:
+                    local_path = url.lstrip("/")
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                        print(f"Deleted local file: {local_path}")
+                    return True
+                except Exception as e:
+                    print(f"Local delete failed for {url}: {e}")
+                    return False
+            
+            # Case 2: TOS File (http...)
+            # We try to delete from TOS if we have config, regardless of current storage_type setting.
+            # This handles cases where user switched from Local to TOS or vice versa.
+            if url.startswith("http"):
+                try:
+                    # Parse key from URL
+                    parsed = urlparse(url)
+                    path = parsed.path.lstrip("/")
+                    
+                    # Heuristic: If we have TOS creds, try to delete.
+                    client = self._get_tos_client()
+                    if client:
+                        bucket = self._get_config("storage_bucket")
+                        if bucket:
+                            # If the URL contains the bucket name or endpoint, it's likely ours.
+                            # Even if not, trying to delete doesn't hurt (unless key conflict, unlikely).
+                            print(f"Attempting TOS delete: bucket={bucket}, key={path}")
+                            client.delete_object(bucket, path)
+                            return True
+                except Exception as e:
+                    print(f"TOS Delete failed for {url}: {e}")
+                    return False
+                    
+            return True # Unknown format, treat as success (nothing to delete)
+            
+        except Exception as e:
+            print(f"Unexpected error in delete_file for {url}: {e}")
+            return False
